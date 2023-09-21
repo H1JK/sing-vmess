@@ -70,22 +70,22 @@ func (c *Client) DialEarlyPacketConn(conn net.Conn, destination M.Socksaddr) (*P
 	return &PacketConn{Conn: conn, key: c.key, destination: destination, flow: c.flow}, nil
 }
 
-func (c *Client) DialXUDPPacketConn(conn net.Conn, destination M.Socksaddr) (vmess.PacketConn, error) {
+func (c *Client) DialXUDPPacketConn(conn net.Conn, globalID [8]byte, destination M.Socksaddr) (vmess.PacketConn, error) {
 	remoteConn := NewConn(conn, c.key, vmess.CommandTCP, destination, c.flow)
 	protocolConn, err := c.prepareConn(remoteConn, conn)
 	if err != nil {
 		return nil, err
 	}
-	return vmess.NewXUDPConn(protocolConn, destination), common.Error(remoteConn.Write(nil))
+	return vmess.NewXUDPConn(protocolConn, globalID, destination), common.Error(remoteConn.Write(nil))
 }
 
-func (c *Client) DialEarlyXUDPPacketConn(conn net.Conn, destination M.Socksaddr) (vmess.PacketConn, error) {
+func (c *Client) DialEarlyXUDPPacketConn(conn net.Conn, globalID [8]byte, destination M.Socksaddr) (vmess.PacketConn, error) {
 	remoteConn := NewConn(conn, c.key, vmess.CommandMux, destination, c.flow)
 	protocolConn, err := c.prepareConn(remoteConn, conn)
 	if err != nil {
 		return nil, err
 	}
-	return vmess.NewXUDPConn(protocolConn, destination), common.Error(remoteConn.Write(nil))
+	return vmess.NewXUDPConn(protocolConn, globalID, destination), common.Error(remoteConn.Write(nil))
 }
 
 var (
