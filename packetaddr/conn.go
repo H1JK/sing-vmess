@@ -121,30 +121,21 @@ var _ N.PacketReadWaiter = (*readWaiterPacketConn)(nil)
 type readWaiterPacketConn struct {
 	readWaiter N.PacketReadWaiter
 	bindAddr   M.Socksaddr
-	buffer     *buf.Buffer
 }
 
-func (c *readWaiterPacketConn) InitializeReadWaiter(newBuffer func() *buf.Buffer) {
-	if newBuffer != nil {
-		newBuffer = func() *buf.Buffer {
-			c.buffer = newBuffer()
-			return c.buffer
-		}
-	}
-	c.readWaiter.InitializeReadWaiter(newBuffer)
+func (c *readWaiterPacketConn) InitializeReadWaiter(options N.ReadWaitOptions) (needCopy bool) {
+	return c.readWaiter.InitializeReadWaiter(options)
 }
 
-func (c *readWaiterPacketConn) WaitReadPacket() (destination M.Socksaddr, err error) {
-	_, err = c.readWaiter.WaitReadPacket()
+func (c *readWaiterPacketConn) WaitReadPacket() (buffer *buf.Buffer, destination M.Socksaddr, err error) {
+	buffer, _, err = c.readWaiter.WaitReadPacket()
 	if err != nil {
-		c.buffer = nil
 		return
 	}
-	destination, err = AddressSerializer.ReadAddrPort(c.buffer)
+	destination, err = AddressSerializer.ReadAddrPort(buffer)
 	if err != nil {
-		c.buffer.Release()
+		buffer.Release()
 	}
-	c.buffer = nil
 	return
 }
 

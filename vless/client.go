@@ -97,11 +97,11 @@ var _ N.PacketReadWaiter = (*PacketConn)(nil)
 
 type PacketConn struct {
 	net.Conn
-	key            []byte
-	destination    M.Socksaddr
-	requestWritten bool
-	responseRead   bool
-	newBuffer      func() *buf.Buffer
+	key             []byte
+	destination     M.Socksaddr
+	requestWritten  bool
+	responseRead    bool
+	readWaitOptions N.ReadWaitOptions
 }
 
 func (c *PacketConn) Read(b []byte) (n int, err error) {
@@ -160,11 +160,12 @@ func (c *PacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
 	return
 }
 
-func (c *PacketConn) InitializeReadWaiter(newBuffer func() *buf.Buffer) {
-	c.newBuffer = newBuffer
+func (c *PacketConn) InitializeReadWaiter(options N.ReadWaitOptions) (needCopy bool) {
+	c.readWaitOptions = options
+	return false
 }
 
-func (c *PacketConn) WaitReadPacket() (destination M.Socksaddr, err error) {
+func (c *PacketConn) WaitReadPacket() (buffer *buf.Buffer, destination M.Socksaddr, err error) {
 	if !c.responseRead {
 		err = ReadResponse(c.Conn)
 		if err != nil {
@@ -178,11 +179,12 @@ func (c *PacketConn) WaitReadPacket() (destination M.Socksaddr, err error) {
 	if err != nil {
 		return
 	}
-	buffer := c.newBuffer()
+	buffer = c.readWaitOptions.NewPacketBuffer()
 	_, err = buffer.ReadFullFrom(c.Conn, int(length))
 	if err != nil {
 		buffer.Release()
 	}
+	c.readWaitOptions.PostReturn(buffer)
 	return
 }
 

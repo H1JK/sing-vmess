@@ -20,12 +20,12 @@ var (
 
 type XUDPConn struct {
 	net.Conn
-	writer         N.ExtendedWriter
-	destination    M.Socksaddr
-	requestWritten bool
-	globalID       [8]byte
-	newBuffer      func() *buf.Buffer
-	header         [6]byte
+	writer          N.ExtendedWriter
+	destination     M.Socksaddr
+	requestWritten  bool
+	globalID        [8]byte
+	readWaitOptions N.ReadWaitOptions
+	header          [6]byte
 }
 
 func NewXUDPConn(conn net.Conn, globalID [8]byte, destination M.Socksaddr) *XUDPConn {
@@ -124,11 +124,12 @@ func (c *XUDPConn) ReadPacket(buffer *buf.Buffer) (destination M.Socksaddr, err 
 	}
 }
 
-func (c *XUDPConn) InitializeReadWaiter(newBuffer func() *buf.Buffer) {
-	c.newBuffer = newBuffer
+func (c *XUDPConn) InitializeReadWaiter(options N.ReadWaitOptions) (needCopy bool) {
+	c.readWaitOptions = options
+	return false
 }
 
-func (c *XUDPConn) WaitReadPacket() (destination M.Socksaddr, err error) {
+func (c *XUDPConn) WaitReadPacket() (buffer *buf.Buffer, destination M.Socksaddr, err error) {
 	_, err = io.ReadFull(c.Conn, c.header[:])
 	if err != nil {
 		return
@@ -137,12 +138,11 @@ func (c *XUDPConn) WaitReadPacket() (destination M.Socksaddr, err error) {
 	if err != nil {
 		return
 	}
-	var buffer *buf.Buffer
 	switch c.header[4] {
 	case StatusNew:
-		return M.Socksaddr{}, E.New("unexpected frame new")
+		return nil, M.Socksaddr{}, E.New("unexpected frame new")
 	case StatusKeep:
-		buffer = c.newBuffer()
+		buffer = c.readWaitOptions.NewPacketBuffer()
 		if length != 4 {
 			start := buffer.Start()
 			_, err = buffer.ReadFullFrom(c.Conn, int(length)-4)
@@ -161,16 +161,16 @@ func (c *XUDPConn) WaitReadPacket() (destination M.Socksaddr, err error) {
 			destination = c.destination
 		}
 	case StatusEnd:
-		return M.Socksaddr{}, io.EOF
+		return nil, M.Socksaddr{}, io.EOF
 	case StatusKeepAlive:
-		buffer = c.newBuffer()
+		buffer = c.readWaitOptions.NewPacketBuffer()
 	default:
-		return M.Socksaddr{}, E.New("unexpected frame: ", c.header[4])
+		return nil, M.Socksaddr{}, E.New("unexpected frame: ", c.header[4])
 	}
 	// option error
 	if c.header[5]&2 == 2 {
 		buffer.Release()
-		return M.Socksaddr{}, E.Cause(net.ErrClosed, "remote closed")
+		return nil, M.Socksaddr{}, E.Cause(net.ErrClosed, "remote closed")
 	}
 	// option data
 	if c.header[5]&1 != 1 {
@@ -178,6 +178,7 @@ func (c *XUDPConn) WaitReadPacket() (destination M.Socksaddr, err error) {
 		if err != nil {
 			buffer.Release()
 		}
+		c.readWaitOptions.PostReturn(buffer)
 		return
 	} else {
 		err = binary.Read(c.Conn, binary.BigEndian, &length)
@@ -189,6 +190,7 @@ func (c *XUDPConn) WaitReadPacket() (destination M.Socksaddr, err error) {
 		if err != nil {
 			buffer.Release()
 		}
+		c.readWaitOptions.PostReturn(buffer)
 		return
 	}
 }

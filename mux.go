@@ -452,11 +452,11 @@ var (
 )
 
 type serverMuxPacketConn struct {
-	sessionID   uint16
-	pipe        *io.PipeReader
-	session     *serverSession
-	destination M.Socksaddr
-	newBuffer   func() *buf.Buffer
+	sessionID       uint16
+	pipe            *io.PipeReader
+	session         *serverSession
+	destination     M.Socksaddr
+	readWaitOptions N.ReadWaitOptions
 }
 
 func (c *serverMuxPacketConn) Read(b []byte) (n int, err error) {
@@ -507,17 +507,18 @@ func (c *serverMuxPacketConn) ReadPacket(buffer *buf.Buffer) (destination M.Sock
 	return
 }
 
-func (c *serverMuxPacketConn) InitializeReadWaiter(newBuffer func() *buf.Buffer) {
-	c.newBuffer = newBuffer
+func (c *serverMuxPacketConn) InitializeReadWaiter(options N.ReadWaitOptions) (needCopy bool) {
+	c.readWaitOptions = options
+	return false
 }
 
-func (c *serverMuxPacketConn) WaitReadPacket() (destination M.Socksaddr, err error) {
+func (c *serverMuxPacketConn) WaitReadPacket() (buffer *buf.Buffer, destination M.Socksaddr, err error) {
 	var length uint16
 	err = binary.Read(c.pipe, binary.BigEndian, &length)
 	if err != nil {
 		return
 	}
-	buffer := c.newBuffer()
+	buffer = c.readWaitOptions.NewPacketBuffer()
 	_, err = buffer.ReadFullFrom(c.pipe, int(length))
 	if err == nil {
 		destination, err = AddressSerializer.ReadAddrPort(c.pipe)
@@ -525,6 +526,7 @@ func (c *serverMuxPacketConn) WaitReadPacket() (destination M.Socksaddr, err err
 	if err != nil {
 		buffer.Release()
 	}
+	c.readWaitOptions.PostReturn(buffer)
 	return
 }
 
