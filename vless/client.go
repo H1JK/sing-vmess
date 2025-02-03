@@ -6,7 +6,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/sagernet/sing-vmess"
+	"github.com/metacubex/sing-vmess"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
 	"github.com/sagernet/sing/common/bufio"
