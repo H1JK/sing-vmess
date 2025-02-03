@@ -19,15 +19,15 @@ import (
 	N "github.com/sagernet/sing/common/network"
 )
 
-var tlsRegistry []func(conn net.Conn) (loaded bool, netConn net.Conn, reflectType reflect.Type, reflectPointer uintptr)
+var tlsRegistry []func(conn net.Conn) (loaded bool, netConn net.Conn, reflectType reflect.Type, reflectPointer unsafe.Pointer)
 
 func init() {
-	tlsRegistry = append(tlsRegistry, func(conn net.Conn) (loaded bool, netConn net.Conn, reflectType reflect.Type, reflectPointer uintptr) {
+	tlsRegistry = append(tlsRegistry, func(conn net.Conn) (loaded bool, netConn net.Conn, reflectType reflect.Type, reflectPointer unsafe.Pointer) {
 		tlsConn, loaded := common.Cast[*tls.Conn](conn)
 		if !loaded {
 			return
 		}
-		return true, tlsConn.NetConn(), reflect.TypeOf(tlsConn).Elem(), uintptr(unsafe.Pointer(tlsConn))
+		return true, tlsConn.NetConn(), reflect.TypeOf(tlsConn).Elem(), unsafe.Pointer(tlsConn)
 	})
 }
 
@@ -64,7 +64,7 @@ func NewVisionConn(conn net.Conn, tlsConn net.Conn, userUUID [16]byte, logger lo
 	var (
 		loaded         bool
 		reflectType    reflect.Type
-		reflectPointer uintptr
+		reflectPointer unsafe.Pointer
 		netConn        net.Conn
 	)
 	for _, tlsCreator := range tlsRegistry {
@@ -82,8 +82,8 @@ func NewVisionConn(conn net.Conn, tlsConn net.Conn, userUUID [16]byte, logger lo
 		Conn:     conn,
 		reader:   bufio.NewChunkReader(conn, xrayChunkSize),
 		writer:   bufio.NewVectorisedWriter(conn),
-		input:    (*bytes.Reader)(unsafe.Pointer(reflectPointer + input.Offset)),
-		rawInput: (*bytes.Buffer)(unsafe.Pointer(reflectPointer + rawInput.Offset)),
+		input:    (*bytes.Reader)(unsafe.Add(reflectPointer, input.Offset)),
+		rawInput: (*bytes.Buffer)(unsafe.Add(reflectPointer, rawInput.Offset)),
 		netConn:  netConn,
 		logger:   logger,
 
