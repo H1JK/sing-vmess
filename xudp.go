@@ -15,9 +15,10 @@ import (
 
 type XUDPConn struct {
 	net.Conn
-	writer         N.ExtendedWriter
-	destination    M.Socksaddr
-	requestWritten bool
+	writer          N.ExtendedWriter
+	destination     M.Socksaddr
+	requestWritten  bool
+	readWaitOptions N.ReadWaitOptions
 }
 
 func NewXUDPConn(conn net.Conn, destination M.Socksaddr) *XUDPConn {
@@ -111,6 +112,79 @@ func (c *XUDPConn) ReadPacket(buffer *buf.Buffer) (destination M.Socksaddr, err 
 		}
 		buffer.Resize(start, 0)
 		_, err = buffer.ReadFullFrom(c.Conn, int(length))
+		return
+	}
+}
+
+func (c *XUDPConn) InitializeReadWaiter(options N.ReadWaitOptions) (needCopy bool) {
+	c.readWaitOptions = options
+	return false
+}
+
+func (c *XUDPConn) WaitReadPacket() (buffer *buf.Buffer, destination M.Socksaddr, err error) {
+	var header [6]byte
+	_, err = io.ReadFull(c.Conn, header[:])
+	if err != nil {
+		return
+	}
+	length := binary.BigEndian.Uint16(header[:])
+	if err != nil {
+		return
+	}
+	switch header[4] {
+	case StatusNew:
+		return nil, M.Socksaddr{}, E.New("unexpected frame new")
+	case StatusKeep:
+		buffer = c.readWaitOptions.NewPacketBuffer()
+		if length != 4 {
+			start := buffer.Start()
+			_, err = buffer.ReadFullFrom(c.Conn, int(length)-4)
+			if err != nil {
+				buffer.Release()
+				return
+			}
+			buffer.Advance(1)
+			destination, err = AddressSerializer.ReadAddrPort(buffer)
+			if err != nil {
+				buffer.Release()
+				return
+			}
+			destination = destination.Unwrap()
+			buffer.Resize(start, 0)
+		} else {
+			destination = c.destination
+		}
+	case StatusEnd:
+		return nil, M.Socksaddr{}, io.EOF
+	case StatusKeepAlive:
+		buffer = c.readWaitOptions.NewPacketBuffer()
+	default:
+		return nil, M.Socksaddr{}, E.New("unexpected frame: ", header[4])
+	}
+	// option error
+	if header[5]&2 == 2 {
+		buffer.Release()
+		return nil, M.Socksaddr{}, E.Cause(net.ErrClosed, "remote closed")
+	}
+	// option data
+	if header[5]&1 != 1 {
+		destination, err = c.ReadPacket(buffer)
+		if err != nil {
+			buffer.Release()
+		}
+		c.readWaitOptions.PostReturn(buffer)
+		return
+	} else {
+		err = binary.Read(c.Conn, binary.BigEndian, &length)
+		if err != nil {
+			buffer.Release()
+			return
+		}
+		_, err = buffer.ReadFullFrom(c.Conn, int(length))
+		if err != nil {
+			buffer.Release()
+		}
+		c.readWaitOptions.PostReturn(buffer)
 		return
 	}
 }

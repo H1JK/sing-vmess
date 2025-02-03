@@ -146,10 +146,10 @@ func (c *serverSession) recv() error {
 				})
 			} else {
 				hErr = c.handler.NewPacketConnection(c.ctx, &serverMuxPacketConn{
-					sessionID,
-					pipeIn,
-					c,
-					destination,
+					sessionID:   sessionID,
+					pipe:        pipeIn,
+					session:     c,
+					destination: destination,
 				}, M.Metadata{
 					Destination: destination,
 				})
@@ -445,13 +445,17 @@ func (c *serverMuxConn) NeedAdditionalReadDeadline() bool {
 	return true
 }
 
-var _ PacketConn = (*serverMuxPacketConn)(nil)
+var (
+	_ PacketConn         = (*serverMuxPacketConn)(nil)
+	_ N.PacketReadWaiter = (*serverMuxPacketConn)(nil)
+)
 
 type serverMuxPacketConn struct {
-	sessionID   uint16
-	pipe        *io.PipeReader
-	session     *serverSession
-	destination M.Socksaddr
+	sessionID       uint16
+	pipe            *io.PipeReader
+	session         *serverSession
+	destination     M.Socksaddr
+	readWaitOptions N.ReadWaitOptions
 }
 
 func (c *serverMuxPacketConn) Read(b []byte) (n int, err error) {
@@ -499,6 +503,32 @@ func (c *serverMuxPacketConn) ReadPacket(buffer *buf.Buffer) (destination M.Sock
 			destination = destination.Unwrap()
 		}
 	}
+	return
+}
+
+func (c *serverMuxPacketConn) InitializeReadWaiter(options N.ReadWaitOptions) (needCopy bool) {
+	c.readWaitOptions = options
+	return false
+}
+
+func (c *serverMuxPacketConn) WaitReadPacket() (buffer *buf.Buffer, destination M.Socksaddr, err error) {
+	var length uint16
+	err = binary.Read(c.pipe, binary.BigEndian, &length)
+	if err != nil {
+		return
+	}
+	buffer = c.readWaitOptions.NewPacketBuffer()
+	_, err = buffer.ReadFullFrom(c.pipe, int(length))
+	if err == nil {
+		destination, err = AddressSerializer.ReadAddrPort(c.pipe)
+		if err == nil {
+			destination = destination.Unwrap()
+		}
+	}
+	if err != nil {
+		buffer.Release()
+	}
+	c.readWaitOptions.PostReturn(buffer)
 	return
 }
 

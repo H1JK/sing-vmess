@@ -200,14 +200,45 @@ func (c *Conn) Upstream() any {
 	return c.ExtendedConn
 }
 
+var _ N.PacketReadWaiter = (*PacketConn)(nil)
+
 type PacketConn struct {
 	net.Conn
-	access         sync.Mutex
-	key            [16]byte
-	destination    M.Socksaddr
-	flow           string
-	requestWritten bool
-	responseRead   bool
+	access          sync.Mutex
+	key             [16]byte
+	destination     M.Socksaddr
+	flow            string
+	requestWritten  bool
+	responseRead    bool
+	readWaitOptions N.ReadWaitOptions
+}
+
+func (c *PacketConn) InitializeReadWaiter(options N.ReadWaitOptions) (needCopy bool) {
+	c.readWaitOptions = options
+	return false
+}
+
+func (c *PacketConn) WaitReadPacket() (buffer *buf.Buffer, destination M.Socksaddr, err error) {
+	if !c.responseRead {
+		err = ReadResponse(c.Conn)
+		if err != nil {
+			return
+		}
+		c.responseRead = true
+	}
+	destination = c.destination
+	var length uint16
+	err = binary.Read(c.Conn, binary.BigEndian, &length)
+	if err != nil {
+		return
+	}
+	buffer = c.readWaitOptions.NewPacketBuffer()
+	_, err = buffer.ReadFullFrom(c.Conn, int(length))
+	if err != nil {
+		buffer.Release()
+	}
+	c.readWaitOptions.PostReturn(buffer)
+	return
 }
 
 func (c *PacketConn) Read(b []byte) (n int, err error) {
